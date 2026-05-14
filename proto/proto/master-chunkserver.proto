@@ -1,0 +1,14 @@
+syntax = "proto3";
+package master_chunkserver;
+
+service HeartBeatService {
+  rpc CollectStatus(CollectStatusRequest) returns (CollectStatusResponse);
+}
+
+message CollectStatusRequest {
+  // TODO: Implement
+}
+
+message CollectStatusResponse {
+  // TODO: Implement
+}
