@@ -1,0 +1,15 @@
+syntax = "proto3";
+package client_master;
+
+service Fs {
+  rpc Create(CreateRequest) returns (CreateResponse);
+}
+
+message CreateRequest {
+  string path = 1;
+}
+
+message CreateResponse {
+  // TODO: Use more detail as failures occur
+  bool success = 1;
+}
