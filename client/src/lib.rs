@@ -1,5 +1,6 @@
-use proto::client_master::CreateRequest;
 use proto::client_master::fs_client::FsClient;
+use proto::client_master::{CreateRequest, CreateResponse};
+use tonic::Response;
 
 pub struct GfsClient {
     inner: FsClient<tonic::transport::Channel>,
@@ -11,6 +12,11 @@ impl GfsClient {
 
         Ok(Self { inner: fs_client })
     }
-}
 
-pub fn create(file_path: &str) {}
+    pub async fn create(
+        &mut self,
+        path: String,
+    ) -> Result<Response<CreateResponse>, tonic::Status> {
+        Ok(self.inner.create(CreateRequest { path }).await?)
+    }
+}

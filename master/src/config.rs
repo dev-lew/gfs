@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::path::Path;
 
 pub struct Config {
-    chunkservers: Vec<IpAddr>,
+    pub chunkservers: Vec<IpAddr>,
 }
 
 impl Config {
