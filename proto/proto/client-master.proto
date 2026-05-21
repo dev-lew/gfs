@@ -14,7 +14,8 @@ message CreateResponse {
   // TODO: Use more detail as failures occur
   enum Error {
     FILE_EXISTS = 0;
-    OTHER = 1;
+    INVALID_PATH = 1;
+    OTHER = 2;
   }
 
   bool success = 1;

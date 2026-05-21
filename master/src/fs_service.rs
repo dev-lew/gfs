@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -14,7 +15,7 @@ pub struct FileMetadata {
 
 pub struct NamespaceNode {
     pub metadata: FileMetadata,
-    pub children: HashMap<String, Arc<RwLock<NamespaceNode>>>,
+    pub children: HashMap<OsString, Arc<RwLock<NamespaceNode>>>,
 }
 
 pub struct MasterFsServer {
@@ -38,25 +39,15 @@ impl MasterFsServer {
         }
     }
 
-    pub fn get(&self, path: PathBuf) -> Option<Arc<RwLock<NamespaceNode>>> {
+    pub fn get(&self, path: &PathBuf) -> Option<Arc<RwLock<NamespaceNode>>> {
         let components = path.components();
-        let mut node = Some(self.root.clone());
+        let mut node = self.root.clone();
 
         for component in components {
             match component {
                 Component::Normal(p) => {
-                    if let Some(n) = node {
-                        node = n
-                            .read()
-                            .unwrap()
-                            .children
-                            .get(&p.to_string_lossy().into_owned())
-                            .cloned();
-
-                        if node.is_none() {
-                            return None;
-                        }
-                    }
+                    let next = node.read().unwrap().children.get(p).cloned()?;
+                    node = next;
                 }
 
                 Component::CurDir | Component::RootDir => continue,
@@ -65,7 +56,7 @@ impl MasterFsServer {
             }
         }
 
-        node
+        Some(node)
     }
 }
 
@@ -76,22 +67,60 @@ impl Fs for MasterFsServer {
         request: Request<CreateRequest>,
     ) -> Result<Response<CreateResponse>, tonic::Status> {
         let CreateRequest { path, is_directory } = request.into_inner();
+
+        // TODO: Sanitize this
         let file = PathBuf::from(path);
 
-        let components = file.components();
+        if self.get(&file).is_some() {
+            return Ok(Response::new(CreateResponse {
+                success: false,
+                error: Some(Error::FileExists as i32),
+            }));
+        } else {
+            let components: Vec<_> = file.components().collect();
+            let mut current_node = self.root.clone();
 
-        for component in components {
-            match component {
-                Component::Normal(p) => {
-                    let k = self.root.write().unwrap();
-                }
-                _ => {
-                    return Ok(Response::new(CreateResponse {
-                        success: false,
-                        error: Some(Error::InvalidPath as i32),
-                    }));
+            let n = components.len() - 1;
+
+            for (i, component) in components.iter().enumerate() {
+                match component {
+                    Component::Normal(p) => {
+                        let node = NamespaceNode {
+                            metadata: FileMetadata {
+                                is_directory: if !is_directory && i != n {
+                                    true
+                                } else {
+                                    is_directory
+                                },
+                                size: 0,
+                            },
+                            children: HashMap::new(),
+                        };
+
+                        let new_node = Arc::new(RwLock::new(node));
+
+                        current_node
+                            .write()
+                            .unwrap()
+                            .children
+                            .insert(p.into(), new_node.clone());
+
+                        current_node = new_node;
+                    }
+                    Component::CurDir | Component::RootDir => continue,
+                    _ => {
+                        return Ok(Response::new(CreateResponse {
+                            success: false,
+                            error: Some(Error::InvalidPath as i32),
+                        }));
+                    }
                 }
             }
+
+            Ok(Response::new(CreateResponse {
+                success: true,
+                error: None,
+            }))
         }
     }
 }
