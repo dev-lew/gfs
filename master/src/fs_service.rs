@@ -137,6 +137,33 @@ mod tests {
     use tokio;
 
     #[tokio::test]
+    async fn get_returns_none_for_missing_path() {
+        let fs = MasterFsServer::new();
+        let node = fs.get(&PathBuf::from("/foo/bar/baz"));
+
+        assert!(node.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_creates_absolute_file() {
+        let fs = MasterFsServer::new();
+        let path = String::from("/foo/bar");
+
+        let req = Request::new(CreateRequest {
+            is_directory: false,
+            path: path.clone(),
+        });
+
+        let _ = fs.create(req).await;
+
+        let foo_ns = fs.get(&PathBuf::from(path.clone()).parent().unwrap().to_owned());
+        assert!(foo_ns.unwrap().read().unwrap().metadata.is_directory);
+
+        let bar_ns = fs.get(&PathBuf::from(path.clone()).to_owned());
+        assert_eq!(bar_ns.unwrap().read().unwrap().metadata.is_directory, false);
+    }
+
+    #[tokio::test]
     async fn it_creates_absolute_directory() {
         let fs = MasterFsServer::new();
         let path = String::from("/foo/bar");
@@ -156,10 +183,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_returns_none_for_missing_path() {
+    async fn it_rejects_duplicate_paths() {
         let fs = MasterFsServer::new();
-        let node = fs.get(&PathBuf::from("/foo/bar/baz"));
+        let path = String::from("/foo");
 
-        assert!(node.is_none());
+        let req = Request::new(CreateRequest {
+            is_directory: true,
+            path: path.clone(),
+        });
+
+        let _ = fs.create(req).await.unwrap().into_inner();
+
+        let req = Request::new(CreateRequest {
+            is_directory: true,
+            path,
+        });
+
+        let second = fs.create(req).await.unwrap().into_inner();
+
+        assert!(!second.success);
+        assert_eq!(second.error, Some(Error::FileExists as i32));
     }
 }
