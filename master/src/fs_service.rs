@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::RwLock;
+use std::path::{Component, PathBuf};
+use std::sync::{Arc, RwLock};
 
+use proto::client_master::create_response::Error;
 use proto::client_master::fs_server::{Fs, FsServer};
 use proto::client_master::{CreateRequest, CreateResponse, create_response};
 use tonic::{Request, Response};
@@ -11,9 +12,61 @@ pub struct FileMetadata {
     pub size: u64,
 }
 
-#[derive(Default)]
+pub struct NamespaceNode {
+    pub metadata: FileMetadata,
+    pub children: HashMap<String, Arc<RwLock<NamespaceNode>>>,
+}
+
 pub struct MasterFsServer {
-    file_metadata: RwLock<HashMap<PathBuf, FileMetadata>>,
+    root: Arc<RwLock<NamespaceNode>>,
+}
+
+impl MasterFsServer {
+    pub fn new() -> Self {
+        let node = {
+            NamespaceNode {
+                metadata: FileMetadata {
+                    is_directory: true,
+                    size: 0,
+                },
+                children: HashMap::new(),
+            }
+        };
+
+        Self {
+            root: Arc::new(RwLock::new(node)),
+        }
+    }
+
+    pub fn get(&self, path: PathBuf) -> Option<Arc<RwLock<NamespaceNode>>> {
+        let components = path.components();
+        let mut node = Some(self.root.clone());
+
+        for component in components {
+            match component {
+                Component::Normal(p) => {
+                    if let Some(n) = node {
+                        node = n
+                            .read()
+                            .unwrap()
+                            .children
+                            .get(&p.to_string_lossy().into_owned())
+                            .cloned();
+
+                        if node.is_none() {
+                            return None;
+                        }
+                    }
+                }
+
+                Component::CurDir | Component::RootDir => continue,
+
+                _ => return None,
+            }
+        }
+
+        node
+    }
 }
 
 #[tonic::async_trait]
@@ -25,24 +78,20 @@ impl Fs for MasterFsServer {
         let CreateRequest { path, is_directory } = request.into_inner();
         let file = PathBuf::from(path);
 
-        if self.file_metadata.read().unwrap().contains_key(&file) {
-            return Ok(Response::new(CreateResponse {
-                success: false,
-                error: Some(create_response::Error::FileExists as i32),
-            }));
-        } else {
-            self.file_metadata.write().unwrap().insert(
-                file,
-                FileMetadata {
-                    is_directory,
-                    size: 0,
-                },
-            );
+        let components = file.components();
 
-            return Ok(Response::new(CreateResponse {
-                success: true,
-                error: None,
-            }));
+        for component in components {
+            match component {
+                Component::Normal(p) => {
+                    let k = self.root.write().unwrap();
+                }
+                _ => {
+                    return Ok(Response::new(CreateResponse {
+                        success: false,
+                        error: Some(Error::InvalidPath as i32),
+                    }));
+                }
+            }
         }
     }
 }
