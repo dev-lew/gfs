@@ -22,8 +22,8 @@ pub struct MasterFsServer {
     root: Arc<RwLock<NamespaceNode>>,
 }
 
-impl MasterFsServer {
-    pub fn new() -> Self {
+impl Default for MasterFsServer {
+    fn default() -> Self {
         let node = {
             NamespaceNode {
                 metadata: FileMetadata {
@@ -37,6 +37,12 @@ impl MasterFsServer {
         Self {
             root: Arc::new(RwLock::new(node)),
         }
+    }
+}
+
+impl MasterFsServer {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn get(&self, path: &PathBuf) -> Option<Arc<RwLock<NamespaceNode>>> {
@@ -122,5 +128,38 @@ impl Fs for MasterFsServer {
                 error: None,
             }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio;
+
+    #[tokio::test]
+    async fn it_creates_absolute_directory() {
+        let fs = MasterFsServer::new();
+        let path = String::from("/foo/bar");
+
+        let req = Request::new(CreateRequest {
+            is_directory: true,
+            path: path.clone(),
+        });
+
+        let _ = fs.create(req).await;
+
+        let foo_ns = fs.get(&PathBuf::from(path.clone()).parent().unwrap().to_owned());
+        assert!(foo_ns.unwrap().read().unwrap().metadata.is_directory);
+
+        let bar_ns = fs.get(&PathBuf::from(path.clone()).to_owned());
+        assert!(bar_ns.unwrap().read().unwrap().metadata.is_directory);
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_for_missing_path() {
+        let fs = MasterFsServer::new();
+        let node = fs.get(&PathBuf::from("/foo/bar/baz"));
+
+        assert!(node.is_none());
     }
 }
