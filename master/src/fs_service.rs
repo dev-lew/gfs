@@ -4,6 +4,7 @@ use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::vec;
 
+use parking_lot::lock_api;
 use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock};
 use proto::client_master::create_response::Error;
 use proto::client_master::fs_server::{Fs, FsServer};
@@ -22,6 +23,14 @@ pub struct LockNode {
 pub struct MasterFsServer {
     namespace: HashMap<PathBuf, FileMetadata>,
     namespace_locks: Arc<RwLock<LockNode>>,
+}
+
+pub enum ArcRwLockGuard<R, T>
+where
+    R: RawRwLock,
+{
+    Read(ArcRwLockReadGuard<R, T>),
+    Write(ArcRwLockReadGuard<R, T>),
 }
 
 impl Default for MasterFsServer {
