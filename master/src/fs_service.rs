@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::error::Error;
 use std::ffi::{OsStr, OsString};
+use std::fmt;
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::vec;
@@ -7,10 +9,32 @@ use std::vec;
 use dashmap::DashMap;
 use parking_lot::lock_api;
 use parking_lot::{ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock, RwLock};
-use proto::client_master::create_response::Error;
+use proto::client_master::create_response::Error as CreateResponseError;
 use proto::client_master::fs_server::{Fs, FsServer};
 use proto::client_master::{CreateRequest, CreateResponse, create_response};
 use tonic::{Request, Response};
+
+#[derive(Debug)]
+pub enum NamespaceError {
+    InvalidPath(PathBuf),
+    NotFound(PathBuf),
+}
+
+impl fmt::Display for NamespaceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NamespaceError::InvalidPath(p) => {
+                write!(f, "invalid path: {:?}", p)
+            }
+
+            NamespaceError::NotFound(p) => {
+                write!(f, "path {:?} does not exist", p)
+            }
+        }
+    }
+}
+
+impl Error for NamespaceError {}
 
 pub struct FileMetadata {
     pub is_directory: bool,
@@ -62,7 +86,10 @@ impl MasterFsServer {
         Self::default()
     }
 
-    fn read(&self, path: &PathBuf) -> Vec<ArcRwLockReadGuard<RawRwLock, LockNode>> {
+    pub fn read(
+        &self,
+        path: &PathBuf,
+    ) -> Result<Vec<ArcRwLockReadGuard<RawRwLock, LockNode>>, NamespaceError> {
         let mut current = self.namespace_locks.clone();
         let mut guards = vec![RwLock::read_arc(&current)];
 
@@ -74,7 +101,7 @@ impl MasterFsServer {
                         .children
                         .get(p)
                         .cloned()
-                        .expect("Path does not exist");
+                        .ok_or_else(|| NamespaceError::NotFound(path.clone()))?;
 
                     guards.push(RwLock::read_arc(&next));
                     current = next;
@@ -82,18 +109,23 @@ impl MasterFsServer {
 
                 Component::CurDir | Component::RootDir => continue,
 
-                _ => panic!("Invalid path"),
+                _ => return Err(NamespaceError::InvalidPath(path.clone())),
             }
         }
 
-        guards
+        Ok(guards)
     }
 
-    fn write(&self, path: &PathBuf) -> Vec<ArcRwLockGuard<RawRwLock, LockNode>> {
+    pub fn write(
+        &self,
+        path: &PathBuf,
+    ) -> Result<Vec<ArcRwLockGuard<RawRwLock, LockNode>>, NamespaceError> {
         let mut current = self.namespace_locks.clone();
         let mut write_guard = None;
 
-        let file = path.file_name().expect("Invalid path");
+        let file = path
+            .file_name()
+            .ok_or_else(|| NamespaceError::InvalidPath(path.clone()))?;
 
         for component in path.components() {
             match component {
@@ -108,19 +140,19 @@ impl MasterFsServer {
                         .children
                         .get(p)
                         .cloned()
-                        .expect("Path does not exist");
+                        .ok_or_else(|| NamespaceError::NotFound(path.clone()))?;
 
                     current = next;
                 }
 
                 Component::CurDir | Component::RootDir => continue,
 
-                _ => panic!("Invalid path"),
+                _ => return Err(NamespaceError::InvalidPath(path.clone())),
             }
         }
 
         let parent = path.parent().expect("Invalid path");
-        let read_guards = self.read(&PathBuf::from(parent));
+        let read_guards = self.read(&PathBuf::from(parent))?;
 
         let mut all_guards = read_guards
             .into_iter()
@@ -129,73 +161,131 @@ impl MasterFsServer {
 
         all_guards.push(ArcRwLockGuard::Write(write_guard.expect("Invalid path")));
 
-        all_guards
+        Ok(all_guards)
     }
 }
 
-// #[tonic::async_trait]
-// impl Fs for MasterFsServer {
-//     async fn create(
-//         &self,
-//         request: Request<CreateRequest>,
-//     ) -> Result<Response<CreateResponse>, tonic::Status> {
-//         let CreateRequest { path, is_directory } = request.into_inner();
+#[tonic::async_trait]
+impl Fs for MasterFsServer {
+    async fn create(
+        &self,
+        request: Request<CreateRequest>,
+    ) -> Result<Response<CreateResponse>, tonic::Status> {
+        let CreateRequest { path, is_directory } = request.into_inner();
 
-//         // TODO: Sanitize this
-//         let file = PathBuf::from(path);
+        // TODO: Sanitize this
+        let path = PathBuf::from(path);
 
-//         if self.get(&file).is_some() {
-//             return Ok(Response::new(CreateResponse {
-//                 success: false,
-//                 error: Some(Error::FileExists as i32),
-//             }));
-//         } else {
-//             let components: Vec<_> = file.components().collect();
-//             let mut current_node = self.root.clone();
+        let first = match path.components().nth(1) {
+            Some(Component::Normal(p)) => p,
+            _ => {
+                return Ok(Response::new(CreateResponse {
+                    success: false,
+                    error: Some(CreateResponseError::InvalidPath as i32),
+                }));
+            }
+        };
 
-//             let n = components.len() - 1;
+        if self.namespace.get(&path).is_some() {
+            return Ok(Response::new(CreateResponse {
+                success: false,
+                error: Some(CreateResponseError::FileExists as i32),
+            }));
+        }
 
-//             for (i, component) in components.iter().enumerate() {
-//                 match component {
-//                     Component::Normal(p) => {
-//                         let node = NamespaceNode {
-//                             metadata: FileMetadata {
-//                                 is_directory: if !is_directory && i != n {
-//                                     true
-//                                 } else {
-//                                     is_directory
-//                                 },
-//                                 size: 0,
-//                             },
-//                             children: DashMap::new(),
-//                         };
+        let root_children = Arc::new(RwLock::new(LockNode {
+            children: HashMap::new(),
+        }));
+        let mut current_node = Arc::clone(&root_children);
 
-//                         let new_node = Arc::new(RwLock::new(node));
+        for component in path.components() {
+            match component {
+                Component::Normal(p) => {
+                    let next = Arc::new(RwLock::new(LockNode {
+                        children: HashMap::new(),
+                    }));
 
-//                         current_node
-//                             .write()
-//                             .unwrap()
-//                             .children
-//                             .insert(p.into(), new_node.clone());
+                    current_node
+                        .write_arc()
+                        .children
+                        .insert(p.into(), Arc::clone(&next));
 
-//                         current_node = new_node;
-//                     }
-//                     Component::CurDir | Component::RootDir => continue,
-//                     _ => {
-//                         return Ok(Response::new(CreateResponse {
-//                             success: false,
-//                             error: Some(Error::InvalidPath as i32),
-//                         }));
-//                     }
-//                 }
+                    current_node = next;
+                }
+
+                Component::CurDir | Component::RootDir => continue,
+                _ => {
+                    return Ok(Response::new(CreateResponse {
+                        success: false,
+                        error: Some(CreateResponseError::InvalidPath as i32),
+                    }));
+                }
+            }
+        }
+
+        self.namespace_locks
+            .write_arc()
+            .children
+            .insert(first.into(), root_children);
+
+        Ok(Response::new(CreateResponse {
+            success: true,
+            error: None,
+        }))
+    }
+}
+
+// if self.get(&file).is_some() {
+//     return Ok(Response::new(CreateResponse {
+//         success: false,
+//         error: Some(Error::FileExists as i32),
+//     }));
+// } else {
+//     let components: Vec<_> = file.components().collect();
+//     let mut current_node = self.root.clone();
+
+//     let n = components.len() - 1;
+
+//     for (i, component) in components.iter().enumerate() {
+//         match component {
+//             Component::Normal(p) => {
+//                 let node = NamespaceNode {
+//                     metadata: FileMetadata {
+//                         is_directory: if !is_directory && i != n {
+//                             true
+//                         } else {
+//                             is_directory
+//                         },
+//                         size: 0,
+//                     },
+//                     children: DashMap::new(),
+//                 };
+
+//                 let new_node = Arc::new(RwLock::new(node));
+
+//                 current_node
+//                     .write()
+//                     .unwrap()
+//                     .children
+//                     .insert(p.into(), new_node.clone());
+
+//                 current_node = new_node;
 //             }
-
-//             Ok(Response::new(CreateResponse {
-//                 success: true,
-//                 error: None,
-//             }))
+//             Component::CurDir | Component::RootDir => continue,
+//             _ => {
+//                 return Ok(Response::new(CreateResponse {
+//                     success: false,
+//                     error: Some(Error::InvalidPath as i32),
+//                 }));
+//             }
 //         }
 //     }
+
+//     Ok(Response::new(CreateResponse {
+//         success: true,
+//         error: None,
+//     }))
+// }
 // }
 
 #[cfg(test)]
