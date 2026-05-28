@@ -4,8 +4,9 @@ use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::vec;
 
+use dashmap::DashMap;
 use parking_lot::lock_api;
-use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock};
+use parking_lot::{ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock, RwLock};
 use proto::client_master::create_response::Error;
 use proto::client_master::fs_server::{Fs, FsServer};
 use proto::client_master::{CreateRequest, CreateResponse, create_response};
@@ -21,21 +22,21 @@ pub struct LockNode {
 }
 
 pub struct MasterFsServer {
-    namespace: HashMap<PathBuf, FileMetadata>,
+    namespace: DashMap<PathBuf, FileMetadata>,
     namespace_locks: Arc<RwLock<LockNode>>,
 }
 
 pub enum ArcRwLockGuard<R, T>
 where
-    R: RawRwLock,
+    R: lock_api::RawRwLock,
 {
     Read(ArcRwLockReadGuard<R, T>),
-    Write(ArcRwLockReadGuard<R, T>),
+    Write(ArcRwLockWriteGuard<R, T>),
 }
 
 impl Default for MasterFsServer {
     fn default() -> Self {
-        let mut root_ns = HashMap::new();
+        let root_ns = DashMap::new();
 
         root_ns.insert(
             PathBuf::from("/"),
@@ -87,6 +88,49 @@ impl MasterFsServer {
 
         guards
     }
+
+    fn write(&self, path: &PathBuf) -> Vec<ArcRwLockGuard<RawRwLock, LockNode>> {
+        let mut current = self.namespace_locks.clone();
+        let mut write_guard = None;
+
+        let file = path.file_name().expect("Invalid path");
+
+        for component in path.components() {
+            match component {
+                Component::Normal(p) => {
+                    if p == file {
+                        write_guard = Some(RwLock::write_arc(&current));
+                        break;
+                    }
+
+                    let next = current
+                        .read_arc()
+                        .children
+                        .get(p)
+                        .cloned()
+                        .expect("Path does not exist");
+
+                    current = next;
+                }
+
+                Component::CurDir | Component::RootDir => continue,
+
+                _ => panic!("Invalid path"),
+            }
+        }
+
+        let parent = path.parent().expect("Invalid path");
+        let read_guards = self.read(&PathBuf::from(parent));
+
+        let mut all_guards = read_guards
+            .into_iter()
+            .map(ArcRwLockGuard::Read)
+            .collect::<Vec<ArcRwLockGuard<_, _>>>();
+
+        all_guards.push(ArcRwLockGuard::Write(write_guard.expect("Invalid path")));
+
+        all_guards
+    }
 }
 
 // #[tonic::async_trait]
@@ -123,7 +167,7 @@ impl MasterFsServer {
 //                                 },
 //                                 size: 0,
 //                             },
-//                             children: HashMap::new(),
+//                             children: DashMap::new(),
 //                         };
 
 //                         let new_node = Arc::new(RwLock::new(node));

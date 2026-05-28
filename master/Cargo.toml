@@ -10,3 +10,4 @@ tonic = "0.14.6"
 tonic-prost = "0.14.6"
 tokio = {version = "1.52.3", features = ["macros", "rt-multi-thread"] }
 parking_lot = {version = "0.12.5", features = ["arc_lock"]}
+dashmap = "6.2.1"
