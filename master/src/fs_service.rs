@@ -1,6 +1,5 @@
-use std::collections::HashMap;
+use core::panic;
 use std::error::Error;
-use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -9,9 +8,9 @@ use std::vec;
 use dashmap::{DashMap, Entry};
 use parking_lot::{ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock, RwLock, lock_api};
 use proto::client_master::create_response::Error as CreateResponseError;
-use proto::client_master::fs_server::{Fs, FsServer};
-use proto::client_master::{CreateRequest, CreateResponse, create_response};
-use tonic::{Request, Response};
+use proto::client_master::fs_server::Fs;
+use proto::client_master::{CreateRequest, CreateResponse};
+use tonic::{Request, Response, async_trait};
 
 pub enum ArcRwLockGuard<R, T>
 where
@@ -23,7 +22,8 @@ where
 #[derive(Debug)]
 pub enum NamespaceError {
     InvalidPath(PathBuf),
-    NotFound(PathBuf),
+    FileExists(PathBuf),
+    FileWithoutLock(PathBuf),
 }
 
 impl fmt::Display for NamespaceError {
@@ -33,8 +33,16 @@ impl fmt::Display for NamespaceError {
                 write!(f, "invalid path: {:?}", p)
             }
 
-            NamespaceError::NotFound(p) => {
-                write!(f, "path {:?} does not exist", p)
+            NamespaceError::FileExists(p) => {
+                write!(f, "file {:?} exists", p)
+            }
+
+            NamespaceError::FileWithoutLock(p) => {
+                write!(
+                    f,
+                    "the file {:?} cannot exist without its associated lock",
+                    p
+                )
             }
         }
     }
@@ -130,7 +138,11 @@ impl MasterFsServer {
         Ok(guards)
     }
 
-    fn create_empty_file(&self, path: &Path) -> bool {
+    fn create_empty_file(&self, path: &Path) -> Result<(), NamespaceError> {
+        if !self.lock_namespace.contains_key(path) {
+            return Err(NamespaceError::FileWithoutLock(path.to_path_buf()));
+        }
+
         match self.file_namespace.entry(path.to_path_buf()) {
             Entry::Vacant(v) => {
                 v.insert(FileMetadata {
@@ -138,13 +150,17 @@ impl MasterFsServer {
                     size: 0,
                 });
 
-                true
+                Ok(())
             }
-            Entry::Occupied(_) => false,
+            Entry::Occupied(_) => Err(NamespaceError::FileExists(path.to_path_buf())),
         }
     }
 
-    fn create_empty_directory(&self, path: &Path) -> bool {
+    fn create_empty_directory(&self, path: &Path) -> Result<(), NamespaceError> {
+        if !self.lock_namespace.contains_key(path) {
+            return Err(NamespaceError::FileWithoutLock(path.to_path_buf()));
+        }
+
         match self.file_namespace.entry(path.to_path_buf()) {
             Entry::Vacant(v) => {
                 v.insert(FileMetadata {
@@ -152,13 +168,14 @@ impl MasterFsServer {
                     size: 0,
                 });
 
-                true
+                Ok(())
             }
-            Entry::Occupied(_) => false,
+            Entry::Occupied(_) => Err(NamespaceError::FileExists(path.to_path_buf())),
         }
     }
 }
 
+#[async_trait]
 impl Fs for MasterFsServer {
     async fn create(
         &self,
@@ -176,29 +193,53 @@ impl Fs for MasterFsServer {
             }));
         }
 
-        let guards = match self.create_locks(&path) {
+        let _guards = match self.create_locks(&path) {
             Ok(g) => g,
-            Err(NamespaceError::InvalidPath(_)) | Err(NamespaceError::NotFound(_)) => {
+
+            Err(NamespaceError::InvalidPath(_)) => {
                 return Ok(Response::new(CreateResponse {
                     success: false,
                     error: Some(CreateResponseError::InvalidPath as i32),
                 }));
             }
+
+            // Other variants are not returned
+            _ => panic!(),
         };
 
         if is_directory {
-            if !self.create_empty_directory(&path) {
-                return Ok(Response::new(CreateResponse {
-                    success: false,
-                    error: Some(CreateResponseError::FileExists as i32),
-                }));
+            if let Err(e) = self.create_empty_directory(&path) {
+                match e {
+                    NamespaceError::FileExists(_) => {
+                        return Ok(Response::new(CreateResponse {
+                            success: false,
+                            error: Some(CreateResponseError::FileExists as i32),
+                        }));
+                    }
+
+                    // TODO: Explain why this cannot happen
+                    NamespaceError::FileWithoutLock(_) => panic!(),
+
+                    // Other variants are not returned
+                    _ => panic!(),
+                }
             }
         } else {
-            if !self.create_empty_file(&path) {
-                return Ok(Response::new(CreateResponse {
-                    success: false,
-                    error: Some(CreateResponseError::FileExists as i32),
-                }));
+            if let Err(e) = self.create_empty_file(&path) {
+                match e {
+                    NamespaceError::FileExists(_) => {
+                        return Ok(Response::new(CreateResponse {
+                            success: false,
+                            error: Some(CreateResponseError::FileExists as i32),
+                        }));
+                    }
+
+                    // TODO: Explain why this cannot happen
+                    NamespaceError::FileWithoutLock(_) => panic!(),
+
+                    // Other variants are not returned
+                    _ => panic!(),
+                }
             }
         }
 
