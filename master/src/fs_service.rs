@@ -80,57 +80,12 @@ impl MasterFsServer {
         Self::default()
     }
 
-    pub fn create_empty_file(&self, path: &Path) -> bool {
-        match self.file_namespace.entry(path.to_path_buf()) {
-            Entry::Vacant(v) => {
-                v.insert(FileMetadata {
-                    is_directory: false,
-                    size: 0,
-                });
-
-                true
-            }
-            Entry::Occupied(_) => false,
-        }
-    }
-
-    pub fn create_empty_directory(&self, path: &Path) -> bool {
-        match self.file_namespace.entry(path.to_path_buf()) {
-            Entry::Vacant(v) => {
-                v.insert(FileMetadata {
-                    is_directory: true,
-                    size: 0,
-                });
-
-                true
-            }
-            Entry::Occupied(_) => false,
-        }
-    }
-}
-
-impl Fs for MasterFsServer {
-    async fn create(
+    fn create_locks(
         &self,
-        request: Request<CreateRequest>,
-    ) -> Result<Response<CreateResponse>, tonic::Status> {
-        let CreateRequest { path, is_directory } = request.into_inner();
-
-        // TODO: Sanitize this
-        let path = PathBuf::from(path);
-
-        if self.file_namespace.get(&path).is_some() {
-            return Ok(Response::new(CreateResponse {
-                success: false,
-                error: Some(CreateResponseError::FileExists as i32),
-            }));
-        }
-
+        path: &Path,
+    ) -> Result<Vec<ArcRwLockGuard<RawRwLock, ()>>, NamespaceError> {
         let Some(file) = path.file_name() else {
-            return Ok(Response::new(CreateResponse {
-                success: false,
-                error: Some(CreateResponseError::InvalidPath as i32),
-            }));
+            return Err(NamespaceError::InvalidPath(path.to_path_buf()));
         };
 
         let root_guard = self
@@ -167,13 +122,69 @@ impl Fs for MasterFsServer {
 
                 Component::CurDir | Component::RootDir => continue,
                 _ => {
-                    return Ok(Response::new(CreateResponse {
-                        success: false,
-                        error: Some(CreateResponseError::InvalidPath as i32),
-                    }));
+                    return Err(NamespaceError::InvalidPath(path.to_path_buf()));
                 }
             }
         }
+
+        Ok(guards)
+    }
+
+    fn create_empty_file(&self, path: &Path) -> bool {
+        match self.file_namespace.entry(path.to_path_buf()) {
+            Entry::Vacant(v) => {
+                v.insert(FileMetadata {
+                    is_directory: false,
+                    size: 0,
+                });
+
+                true
+            }
+            Entry::Occupied(_) => false,
+        }
+    }
+
+    fn create_empty_directory(&self, path: &Path) -> bool {
+        match self.file_namespace.entry(path.to_path_buf()) {
+            Entry::Vacant(v) => {
+                v.insert(FileMetadata {
+                    is_directory: true,
+                    size: 0,
+                });
+
+                true
+            }
+            Entry::Occupied(_) => false,
+        }
+    }
+}
+
+impl Fs for MasterFsServer {
+    async fn create(
+        &self,
+        request: Request<CreateRequest>,
+    ) -> Result<Response<CreateResponse>, tonic::Status> {
+        let CreateRequest { path, is_directory } = request.into_inner();
+
+        // TODO: Sanitize this
+        let path = PathBuf::from(path);
+
+        if self.file_namespace.get(&path).is_some() {
+            return Ok(Response::new(CreateResponse {
+                success: false,
+                error: Some(CreateResponseError::FileExists as i32),
+            }));
+        }
+
+        let guards = match self.create_locks(&path) {
+            Ok(g) => g,
+            Err(NamespaceError::InvalidPath(_)) | Err(NamespaceError::NotFound(_)) => {
+                return Ok(Response::new(CreateResponse {
+                    success: false,
+                    error: Some(CreateResponseError::InvalidPath as i32),
+                }));
+            }
+        };
 
         if is_directory {
             if !self.create_empty_directory(&path) {
