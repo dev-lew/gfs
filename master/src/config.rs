@@ -1,10 +1,10 @@
 use std::error::Error;
 use std::fs;
-use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::path::Path;
 
 pub struct Config {
-    pub chunkservers: Vec<IpAddr>,
+    pub chunkservers: Vec<Ipv4Addr>,
 }
 
 impl Config {
@@ -14,12 +14,12 @@ impl Config {
         })
     }
 
-    fn parse(path: &Path) -> Result<Vec<IpAddr>, Box<dyn Error>> {
+    fn parse(path: &Path) -> Result<Vec<Ipv4Addr>, Box<dyn Error>> {
         let contents = fs::read_to_string(path)?;
 
         let chunkservers = contents
             .split_whitespace()
-            .map(|ip| ip.parse::<IpAddr>())
+            .map(|ip| ip.parse::<Ipv4Addr>())
             .collect::<Result<_, _>>()?;
 
         Ok(chunkservers)
