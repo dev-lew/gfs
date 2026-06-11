@@ -1,16 +1,21 @@
 use core::panic;
 use std::error::Error;
 use std::fmt;
+use std::net::Ipv4Addr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::vec;
 
 use dashmap::{DashMap, Entry};
 use parking_lot::{ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock, RwLock, lock_api};
 use proto::client_master::create_response::Error as CreateResponseError;
 use proto::client_master::fs_server::Fs;
-use proto::client_master::{CreateRequest, CreateResponse};
+use proto::client_master::write_response::Error as WriteResponseError;
+use proto::client_master::{CreateRequest, CreateResponse, WriteRequest, WriteResponse};
 use tonic::{Request, Response, async_trait};
+
+static NEXT_HANDLE: AtomicU64 = AtomicU64::new(0);
 
 pub enum ArcRwLockGuard<R, T>
 where
@@ -19,6 +24,7 @@ where
     Read(ArcRwLockReadGuard<R, T>),
     Write(ArcRwLockWriteGuard<R, T>),
 }
+
 #[derive(Debug)]
 pub enum NamespaceError {
     InvalidPath(PathBuf),
@@ -50,9 +56,15 @@ impl fmt::Display for NamespaceError {
 
 impl Error for NamespaceError {}
 
+pub struct ChunkMetadata {
+    chunk_handle: u64,
+    locations: Vec<Ipv4Addr>,
+}
+
 pub struct FileMetadata {
     pub is_directory: bool,
     pub size: u64,
+    pub chunks: Vec<ChunkMetadata>,
 }
 
 pub struct MasterFsServer {
@@ -69,6 +81,7 @@ impl Default for MasterFsServer {
             FileMetadata {
                 is_directory: true,
                 size: 0,
+                chunks: Vec::new(),
             },
         );
 
@@ -88,10 +101,7 @@ impl MasterFsServer {
         Self::default()
     }
 
-    fn create_locks(
-        &self,
-        path: &Path,
-    ) -> Result<Vec<ArcRwLockGuard<RawRwLock, ()>>, NamespaceError> {
+    fn write(&self, path: &Path) -> Result<Vec<ArcRwLockGuard<RawRwLock, ()>>, NamespaceError> {
         let Some(file) = path.file_name() else {
             return Err(NamespaceError::InvalidPath(path.to_path_buf()));
         };
@@ -138,6 +148,45 @@ impl MasterFsServer {
         Ok(guards)
     }
 
+    fn read(&self, path: &Path) -> Result<Vec<ArcRwLockReadGuard<RawRwLock, ()>>, NamespaceError> {
+        let root_guard = self
+            .lock_namespace
+            .get(&PathBuf::from("/"))
+            .expect("file namespace has no root")
+            .read_arc();
+        let mut guards = vec![root_guard];
+
+        let mut current = PathBuf::from("/");
+
+        for component in path.components() {
+            match component {
+                Component::Normal(p) => {
+                    current = current.join(p);
+
+                    // There is no need to hold the lock before insertion,
+                    // because we do not enforce a global ordering of events.
+                    // The following serialization is valid:
+                    // T1 inserts lock, T2 finds the lock, T2 creates
+                    let handle = Arc::clone(
+                        &self
+                            .lock_namespace
+                            .entry(current.clone())
+                            .or_insert_with(|| Arc::new(RwLock::new(()))),
+                    );
+
+                    guards.push(handle.read_arc());
+                }
+
+                Component::CurDir | Component::RootDir => continue,
+                _ => {
+                    return Err(NamespaceError::InvalidPath(path.to_path_buf()));
+                }
+            }
+        }
+
+        Ok(guards)
+    }
+
     fn create_empty_file(&self, path: &Path) -> Result<(), NamespaceError> {
         if !self.lock_namespace.contains_key(path) {
             return Err(NamespaceError::FileWithoutLock(path.to_path_buf()));
@@ -148,6 +197,7 @@ impl MasterFsServer {
                 v.insert(FileMetadata {
                     is_directory: false,
                     size: 0,
+                    chunks: Vec::new(),
                 });
 
                 Ok(())
@@ -166,6 +216,7 @@ impl MasterFsServer {
                 v.insert(FileMetadata {
                     is_directory: true,
                     size: 0,
+                    chunks: Vec::new(),
                 });
 
                 Ok(())
@@ -186,7 +237,7 @@ impl Fs for MasterFsServer {
         // TODO: Sanitize this
         let path = PathBuf::from(path);
 
-        if self.file_namespace.get(&path).is_some() {
+        if self.file_namespace.contains_key(&path) {
             return Ok(Response::new(CreateResponse {
                 success: false,
                 error: Some(CreateResponseError::FileExists as i32),
@@ -245,6 +296,31 @@ impl Fs for MasterFsServer {
 
         Ok(Response::new(CreateResponse {
             success: true,
+            error: None,
+        }))
+    }
+
+    async fn write(
+        &self,
+        request: Request<WriteRequest>,
+    ) -> Result<Response<WriteResponse>, tonic::Status> {
+        let WriteRequest { path, offset } = request.into_inner();
+
+        let path = PathBuf::from(path);
+
+        if !self.file_namespace.contains_key(&path) {
+            return Ok(Response::new(WriteResponse {
+                success: false,
+                chunkservers: Vec::new(),
+                error: Some(WriteResponseError::FileDoesNotExist as i32),
+            }));
+        }
+
+        let _guards = self.write(&path);
+
+        Ok(Response::new(WriteResponse {
+            success: true,
+            chunkservers: Vec::new(),
             error: None,
         }))
     }

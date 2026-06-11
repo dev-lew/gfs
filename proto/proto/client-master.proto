@@ -3,6 +3,7 @@ package client_master;
 
 service Fs {
   rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Write(WriteRequest) returns (WriteResponse);
 }
 
 message CreateRequest {
@@ -20,4 +21,26 @@ message CreateResponse {
 
   bool success = 1;
   optional Error error = 2;
+}
+
+message WriteRequest {
+  string path = 1;
+  uint64 offset = 2;
+}
+
+message WriteResponse {
+  // TODO: Use more detail as failures occur
+  enum Error {
+    FILE_DOES_NOT_EXIST = 0;
+    INVALID_PATH = 1;
+    OTHER = 2;
+  }
+
+  bool success = 1;
+  repeated string chunkservers = 2;
+  optional Error error = 3;
+}
+
+message ChunkMetadata {
+  uint64 chunk_handle = 1;
 }
