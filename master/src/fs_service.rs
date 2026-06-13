@@ -1,7 +1,6 @@
 use core::panic;
 use std::error::Error;
 use std::fmt;
-use std::net::Ipv4Addr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -14,6 +13,9 @@ use proto::client_master::fs_server::Fs;
 use proto::client_master::write_response::Error as WriteResponseError;
 use proto::client_master::{CreateRequest, CreateResponse, WriteRequest, WriteResponse};
 use tonic::{Request, Response, async_trait};
+
+mod lease;
+use lease::Lease;
 
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(0);
 
@@ -58,7 +60,7 @@ impl Error for NamespaceError {}
 
 pub struct ChunkMetadata {
     chunk_handle: u64,
-    locations: Vec<Ipv4Addr>,
+    lease: Lease,
 }
 
 pub struct FileMetadata {
@@ -239,18 +241,18 @@ impl Fs for MasterFsServer {
 
         if self.file_namespace.contains_key(&path) {
             return Ok(Response::new(CreateResponse {
-                success: false,
                 error: Some(CreateResponseError::FileExists as i32),
+                ..Default::default()
             }));
         }
 
-        let _guards = match self.create_locks(&path) {
+        let _guards = match self.write(&path) {
             Ok(g) => g,
 
             Err(NamespaceError::InvalidPath(_)) => {
                 return Ok(Response::new(CreateResponse {
-                    success: false,
                     error: Some(CreateResponseError::InvalidPath as i32),
+                    ..Default::default()
                 }));
             }
 
@@ -263,8 +265,8 @@ impl Fs for MasterFsServer {
                 match e {
                     NamespaceError::FileExists(_) => {
                         return Ok(Response::new(CreateResponse {
-                            success: false,
                             error: Some(CreateResponseError::FileExists as i32),
+                            ..Default::default()
                         }));
                     }
 
@@ -280,8 +282,8 @@ impl Fs for MasterFsServer {
                 match e {
                     NamespaceError::FileExists(_) => {
                         return Ok(Response::new(CreateResponse {
-                            success: false,
                             error: Some(CreateResponseError::FileExists as i32),
+                            ..Default::default()
                         }));
                     }
 
@@ -310,13 +312,30 @@ impl Fs for MasterFsServer {
 
         if !self.file_namespace.contains_key(&path) {
             return Ok(Response::new(WriteResponse {
-                success: false,
-                chunkservers: Vec::new(),
                 error: Some(WriteResponseError::FileDoesNotExist as i32),
+                ..Default::default()
             }));
         }
 
-        let _guards = self.write(&path);
+        let _guards = match self.write(&path) {
+            Ok(g) => g,
+
+            Err(NamespaceError::InvalidPath(_)) => {
+                return Ok(Response::new(WriteResponse {
+                    error: Some(WriteResponseError::InvalidPath as i32),
+                    ..Default::default()
+                }));
+            }
+
+            // Other variants are not returned
+            _ => panic!(),
+        };
+
+        let metadata = self.file_namespace.get(&path).expect("file does not exist");
+
+        if metadata.chunks.is_empty() {
+            unimplemented!()
+        }
 
         Ok(Response::new(WriteResponse {
             success: true,

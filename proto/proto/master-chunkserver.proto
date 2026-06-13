@@ -1,14 +1,15 @@
 syntax = "proto3";
 package master_chunkserver;
 
-service HeartBeatService {
+service HeartbeatService {
   rpc CollectStatus(CollectStatusRequest) returns (CollectStatusResponse);
 }
 
 message CollectStatusRequest {
-  // TODO: Implement
+  repeated uint64 available_chunks = 1;
 }
 
 message CollectStatusResponse {
-  // TODO: Implement
+  repeated uint64 deleted_chunks = 1;
+  repeated uint64 leased_chunks = 2;
 }
