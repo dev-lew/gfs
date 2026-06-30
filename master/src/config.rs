@@ -5,12 +5,14 @@ use std::path::Path;
 
 pub struct Config {
     pub chunkservers: Vec<Ipv4Addr>,
+    pub chunk_size: u64,
 }
 
 impl Config {
-    pub fn new(path: &Path) -> Result<Self, Box<dyn Error>> {
+    pub fn new(path: &Path, chunk_size: u64) -> Result<Self, Box<dyn Error>> {
         Ok(Self {
             chunkservers: Self::parse(path)?,
+            chunk_size,
         })
     }
 

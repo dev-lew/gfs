@@ -15,10 +15,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect::<Vec<String>>();
     let config_path = &args[1];
 
-    let cfg = Config::new(Path::new(config_path))?;
+    let cfg = Config::new(Path::new(config_path), 1 << 26)?;
 
     Server::builder()
-        .add_service(FsServer::new(fs_service::MasterFsServer::default()))
+        .add_service(FsServer::new(fs_service::MasterFsServer::new(cfg)))
         .serve("[::1]:50501".parse()?)
         .await?;
 

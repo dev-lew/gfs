@@ -26,21 +26,26 @@ message CreateResponse {
 message WriteRequest {
   string path = 1;
   uint64 offset = 2;
+  uint64 length = 3;
 }
 
 message WriteResponse {
   // TODO: Use more detail as failures occur
   enum Error {
     FILE_DOES_NOT_EXIST = 0;
-    INVALID_PATH = 1;
-    OTHER = 2;
+    INVALID_OFFSET = 1;
+    INVALID_PATH = 2;
+    PATH_IS_DIRECTORY = 3;
+    OTHER = 4;
+  }
+
+  message ChunkLocation {
+    string primary = 1;
+    repeated string secondaries = 2;
   }
 
   bool success = 1;
-  repeated string chunkservers = 2;
+  repeated ChunkLocation chunk_locations = 2;
   optional Error error = 3;
 }
 
-message ChunkMetadata {
-  uint64 chunk_handle = 1;
-}

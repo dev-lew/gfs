@@ -1,12 +1,14 @@
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
+use proto::client_master::write_response::ChunkLocation;
+
 static LEASE_DURATION: Duration = Duration::from_secs(60);
 
 pub struct Lease {
-    primary: Option<Ipv4Addr>,
-    secondaries: Vec<Ipv4Addr>,
-    expiration: Instant,
+    pub primary: Option<Ipv4Addr>,
+    pub secondaries: Vec<Ipv4Addr>,
+    pub expiration: Instant,
 }
 
 impl Lease {
@@ -23,5 +25,20 @@ impl Lease {
 
     pub fn is_expired(&self) -> bool {
         return Instant::now() > self.expiration;
+    }
+}
+
+impl TryFrom<&Lease> for ChunkLocation {
+    type Error = ();
+
+    fn try_from(lease: &Lease) -> Result<Self, Self::Error> {
+        if lease.primary.is_none() {
+            return Err(());
+        }
+
+        Ok(Self {
+            primary: lease.primary.unwrap().to_string(),
+            secondaries: lease.secondaries.iter().map(Ipv4Addr::to_string).collect(),
+        })
     }
 }

@@ -1,6 +1,7 @@
 use core::panic;
 use std::error::Error;
 use std::fmt;
+use std::net::Ipv4Addr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -17,6 +18,8 @@ use tonic::{Request, Response, async_trait};
 mod lease;
 use lease::Lease;
 
+use crate::config::Config;
+
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(0);
 
 pub enum ArcRwLockGuard<R, T>
@@ -29,18 +32,14 @@ where
 
 #[derive(Debug)]
 pub enum NamespaceError {
-    InvalidPath(PathBuf),
     FileExists(PathBuf),
     FileWithoutLock(PathBuf),
+    InvalidPath(PathBuf),
 }
 
 impl fmt::Display for NamespaceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NamespaceError::InvalidPath(p) => {
-                write!(f, "invalid path: {:?}", p)
-            }
-
             NamespaceError::FileExists(p) => {
                 write!(f, "file {:?} exists", p)
             }
@@ -52,30 +51,45 @@ impl fmt::Display for NamespaceError {
                     p
                 )
             }
+
+            NamespaceError::InvalidPath(p) => {
+                write!(f, "invalid path: {:?}", p)
+            }
         }
     }
 }
 
 impl Error for NamespaceError {}
 
-pub struct ChunkMetadata {
-    chunk_handle: u64,
+pub struct Chunk {
+    handle: u64,
     lease: Lease,
+}
+
+impl Chunk {
+    pub fn new(primary: Ipv4Addr, secondaries: Vec<Ipv4Addr>) -> Self {
+        Self {
+            handle: NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            lease: Lease::new(primary, secondaries),
+        }
+    }
 }
 
 pub struct FileMetadata {
     pub is_directory: bool,
     pub size: u64,
-    pub chunks: Vec<ChunkMetadata>,
+    pub chunks: Vec<Chunk>,
 }
 
 pub struct MasterFsServer {
     file_namespace: DashMap<PathBuf, FileMetadata>,
     lock_namespace: DashMap<PathBuf, Arc<RwLock<()>>>,
+    chunkservers: Vec<Ipv4Addr>,
+    chunk_size: u64,
 }
 
-impl Default for MasterFsServer {
-    fn default() -> Self {
+impl MasterFsServer {
+    pub fn new(config: Config) -> Self {
         let file_namespace = DashMap::new();
 
         file_namespace.insert(
@@ -91,16 +105,17 @@ impl Default for MasterFsServer {
 
         lock_namespace.insert(PathBuf::from("/"), Arc::new(RwLock::new(())));
 
+        let Config {
+            chunkservers,
+            chunk_size,
+        } = config;
+
         Self {
             file_namespace,
             lock_namespace,
+            chunkservers,
+            chunk_size,
         }
-    }
-}
-
-impl MasterFsServer {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     fn write(&self, path: &Path) -> Result<Vec<ArcRwLockGuard<RawRwLock, ()>>, NamespaceError> {
@@ -226,6 +241,15 @@ impl MasterFsServer {
             Entry::Occupied(_) => Err(NamespaceError::FileExists(path.to_path_buf())),
         }
     }
+
+    fn create_chunk(&self) -> Chunk {
+        let mut chunkservers = self.chunkservers.clone();
+
+        let primary = chunkservers.remove(0);
+        let secondaries = chunkservers;
+
+        return Chunk::new(primary, secondaries);
+    }
 }
 
 #[async_trait]
@@ -306,7 +330,11 @@ impl Fs for MasterFsServer {
         &self,
         request: Request<WriteRequest>,
     ) -> Result<Response<WriteResponse>, tonic::Status> {
-        let WriteRequest { path, offset } = request.into_inner();
+        let WriteRequest {
+            path,
+            offset,
+            length,
+        } = request.into_inner();
 
         let path = PathBuf::from(path);
 
@@ -331,15 +359,53 @@ impl Fs for MasterFsServer {
             _ => panic!(),
         };
 
-        let metadata = self.file_namespace.get(&path).expect("file does not exist");
+        let mut metadata = self
+            .file_namespace
+            .get_mut(&path)
+            .expect("file does not exist");
+
+        if metadata.is_directory {
+            return Ok(Response::new(WriteResponse {
+                error: Some(WriteResponseError::PathIsDirectory as i32),
+                ..Default::default()
+            }));
+        }
 
         if metadata.chunks.is_empty() {
-            unimplemented!()
+            // TODO: Implement padding
+            if offset != 0 {
+                return Ok(Response::new(WriteResponse {
+                    error: Some(WriteResponseError::InvalidOffset as i32),
+                    ..Default::default()
+                }));
+            }
+
+            for _ in 0..length % self.chunk_size {
+                metadata.chunks.push(self.create_chunk())
+            }
+
+            // Each lease is identical, so only create a Vec of length 1
+            // even if the number of chunks > 1 so as not to waste space
+            let lease = &metadata.chunks.first().unwrap().lease;
+            let mut chunk_locations = Vec::new();
+
+            chunk_locations.push(lease.try_into().unwrap());
+
+            return Ok(Response::new(WriteResponse {
+                success: true,
+                chunk_locations,
+                error: None,
+            }));
         }
+
+        let chunk_locations = metadata.chunks.iter().fold(Vec::new(), |mut acc, c| {
+            acc.push((&c.lease).try_into().unwrap());
+            acc
+        });
 
         Ok(Response::new(WriteResponse {
             success: true,
-            chunkservers: Vec::new(),
+            chunk_locations,
             error: None,
         }))
     }
