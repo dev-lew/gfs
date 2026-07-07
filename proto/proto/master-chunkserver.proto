@@ -1,8 +1,9 @@
 syntax = "proto3";
 package master_chunkserver;
 
-service HeartbeatService {
+service Heartbeat {
   rpc CollectStatus(CollectStatusRequest) returns (CollectStatusResponse);
+  rpc AssignLease(AssignLeaseRequest) returns (AssignLeaseResponse);
 }
 
 message CollectStatusRequest {
@@ -12,4 +13,12 @@ message CollectStatusRequest {
 message CollectStatusResponse {
   repeated uint64 deleted_chunks = 1;
   repeated uint64 leased_chunks = 2;
+}
+
+message AssignLeaseRequest {
+  repeated uint64 handles = 1;
+}
+
+message AssignLeaseResponse {
+  bool success = 1;
 }
