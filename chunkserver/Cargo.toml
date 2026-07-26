@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-proto = { path = "../proto" }
+dashmap = "6.2.1"
 prost = "0.14.3"
+prost-types = "0.14.4"
+proto = { path = "../proto" }
+tokio = {version = "1.52.3", features = ["macros", "rt-multi-thread"] }
 tonic = "0.14.6"
 tonic-prost = "0.14.6"
-tokio = {version = "1.52.3", features = ["macros", "rt-multi-thread"] }
