@@ -398,10 +398,15 @@ impl Fs for MasterFsServer {
             }));
         }
 
-        let chunk_locations = metadata.chunks.iter().fold(Vec::new(), |mut acc, c| {
-            acc.push((&c.lease).try_into().unwrap());
-            acc
-        });
+        let mut chunk_locations = Vec::new();
+
+        for chunk in &mut metadata.chunks {
+            if chunk.lease.primary.is_none() {
+                chunk.lease.promote_secondary()
+            }
+
+            chunk_locations.push((&chunk.lease).try_into().unwrap())
+        }
 
         Ok(Response::new(WriteResponse {
             success: true,

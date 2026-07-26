@@ -26,6 +26,16 @@ impl Lease {
     pub fn is_expired(&self) -> bool {
         return Instant::now() > self.expiration;
     }
+
+    pub fn promote_secondary(&mut self) {
+        let new_primary = Some(self.secondaries.remove(0));
+
+        if let Some(p) = self.primary {
+            self.secondaries.push(p);
+        }
+
+        self.primary = new_primary;
+    }
 }
 
 impl TryFrom<&Lease> for ChunkLocation {
