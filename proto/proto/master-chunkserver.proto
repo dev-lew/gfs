@@ -1,6 +1,8 @@
 syntax = "proto3";
 package master_chunkserver;
 
+import "google/protobuf/timestamp.proto";
+
 service Heartbeat {
   rpc CollectStatus(CollectStatusRequest) returns (CollectStatusResponse);
   rpc AssignLease(AssignLeaseRequest) returns (AssignLeaseResponse);
@@ -17,6 +19,7 @@ message CollectStatusResponse {
 
 message AssignLeaseRequest {
   repeated uint64 handles = 1;
+  repeated google.protobuf.Timestamp expirations = 2;
 }
 
 message AssignLeaseResponse {
