@@ -4,8 +4,13 @@ use std::fs;
 use std::path::Path;
 
 use dashmap::DashSet;
-use proto::master_chunkserver::heartbeat_server::HeartbeatServer;
+use proto::master_chunkserver::CollectStatusRequest;
+use proto::master_chunkserver::lease_client::LeaseClient;
+use proto::master_chunkserver::lease_server::LeaseServer;
+use proto::master_chunkserver::status_client::StatusClient;
+use proto::master_chunkserver::status_server::StatusServer;
 
+use tonic::Request;
 use tonic::transport::Server;
 
 mod config;
@@ -48,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let chunks = scan_chunks(chunk_dir)?;
 
     Server::builder()
-        .add_service(HeartbeatServer::new(heartbeat_service::Chunkserver::new(
+        .add_service(LeaseServer::new(heartbeat_service::Chunkserver::new(
             cfg, chunks,
         )))
         .serve("[::1]:50501".parse()?)

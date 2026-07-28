@@ -3,9 +3,12 @@ package master_chunkserver;
 
 import "google/protobuf/timestamp.proto";
 
-service Heartbeat {
-  rpc CollectStatus(CollectStatusRequest) returns (CollectStatusResponse);
+service Lease {
   rpc AssignLease(AssignLeaseRequest) returns (AssignLeaseResponse);
+}
+
+service Status {
+  rpc CollectStatus(CollectStatusRequest) returns (CollectStatusResponse);
 }
 
 message CollectStatusRequest {
