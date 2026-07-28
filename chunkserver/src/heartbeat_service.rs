@@ -58,17 +58,15 @@ impl Chunkserver {
             master_addr,
         } = config;
 
-        let chunks = Arc::new(chunks);
-
         Self {
             chunk_dir,
             master_addr,
-            chunks,
+            chunks: Arc::new(chunks),
             active_leases: DashMap::new(),
         }
     }
 
-    async fn send_status(&self) {
+    pub fn spawn_status_task(&self) {
         let chunks = self.chunks.clone();
         let master_addr = self.master_addr.clone();
 

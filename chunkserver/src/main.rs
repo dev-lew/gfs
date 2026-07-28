@@ -17,6 +17,7 @@ mod config;
 use config::Config;
 
 mod heartbeat_service;
+use heartbeat_service::Chunkserver;
 
 fn scan_chunks(chunk_dir: &Path) -> Result<DashSet<u64>, Box<dyn Error>> {
     let chunks = DashSet::new();
@@ -51,11 +52,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let chunks = scan_chunks(chunk_dir)?;
+    let chunkserver = Chunkserver::new(cfg, chunks);
+
+    chunkserver.spawn_status_task();
 
     Server::builder()
-        .add_service(LeaseServer::new(heartbeat_service::Chunkserver::new(
-            cfg, chunks,
-        )))
+        .add_service(LeaseServer::new(chunkserver))
         .serve("[::1]:50501".parse()?)
         .await?;
 
