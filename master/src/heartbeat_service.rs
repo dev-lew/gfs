@@ -49,8 +49,9 @@ impl Status for MasterFsServer {
             }
         }
 
+        // Todo: report new leases
         Ok(Response::new(CollectStatusResponse {
-            deleted_chunks: Vec::new(),
+            deleted_chunks,
             leased_chunks: Vec::new(),
         }))
     }
