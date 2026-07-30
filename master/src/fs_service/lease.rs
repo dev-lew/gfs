@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
@@ -7,12 +8,12 @@ static LEASE_DURATION: Duration = Duration::from_secs(60);
 
 pub struct Lease {
     pub primary: Option<Ipv4Addr>,
-    pub secondaries: Vec<Ipv4Addr>,
+    pub secondaries: HashSet<Ipv4Addr>,
     pub expiration: Instant,
 }
 
 impl Lease {
-    pub fn new(primary: Ipv4Addr, secondaries: Vec<Ipv4Addr>) -> Self {
+    pub fn new(primary: Ipv4Addr, secondaries: HashSet<Ipv4Addr>) -> Self {
         Self {
             primary: Some(primary),
             secondaries,
@@ -28,13 +29,15 @@ impl Lease {
     }
 
     pub fn promote_secondary(&mut self) {
-        let new_primary = Some(self.secondaries.remove(0));
+        if let Some(new_primary) = self.secondaries.iter().next().copied() {
+            self.secondaries.take(&new_primary);
 
-        if let Some(p) = self.primary {
-            self.secondaries.push(p);
+            if let Some(p) = self.primary {
+                self.secondaries.insert(p);
+            }
+
+            self.primary = Some(new_primary);
         }
-
-        self.primary = new_primary;
     }
 }
 

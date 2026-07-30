@@ -1,4 +1,5 @@
 use core::panic;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -62,12 +63,12 @@ impl fmt::Display for NamespaceError {
 impl Error for NamespaceError {}
 
 pub struct Chunk {
-    handle: u64,
-    lease: Lease,
+    pub handle: u64,
+    pub lease: Lease,
 }
 
 impl Chunk {
-    pub fn new(primary: Ipv4Addr, secondaries: Vec<Ipv4Addr>) -> Self {
+    pub fn new(primary: Ipv4Addr, secondaries: HashSet<Ipv4Addr>) -> Self {
         Self {
             handle: NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             lease: Lease::new(primary, secondaries),
@@ -82,9 +83,10 @@ pub struct FileMetadata {
 }
 
 pub struct MasterFsServer {
-    file_namespace: DashMap<PathBuf, FileMetadata>,
+    pub handle_map: DashMap<u64, PathBuf>,
+    pub file_namespace: DashMap<PathBuf, FileMetadata>,
     lock_namespace: DashMap<PathBuf, Arc<RwLock<()>>>,
-    chunkservers: Vec<Ipv4Addr>,
+    chunkservers: HashSet<Ipv4Addr>,
     chunk_size: u64,
 }
 
@@ -111,6 +113,7 @@ impl MasterFsServer {
         } = config;
 
         Self {
+            handle_map: DashMap::new(),
             file_namespace,
             lock_namespace,
             chunkservers,
@@ -118,7 +121,10 @@ impl MasterFsServer {
         }
     }
 
-    fn write(&self, path: &Path) -> Result<Vec<ArcRwLockGuard<RawRwLock, ()>>, NamespaceError> {
+    fn write(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<ArcRwLockGuard<RawRwLock, ()>>, NamespaceError> {
         let Some(file) = path.file_name() else {
             return Err(NamespaceError::InvalidPath(path.to_path_buf()));
         };
@@ -165,7 +171,10 @@ impl MasterFsServer {
         Ok(guards)
     }
 
-    fn read(&self, path: &Path) -> Result<Vec<ArcRwLockReadGuard<RawRwLock, ()>>, NamespaceError> {
+    fn read(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<ArcRwLockReadGuard<RawRwLock, ()>>, NamespaceError> {
         let root_guard = self
             .lock_namespace
             .get(&PathBuf::from("/"))
@@ -245,7 +254,13 @@ impl MasterFsServer {
     fn create_chunk(&self) -> Chunk {
         let mut chunkservers = self.chunkservers.clone();
 
-        let primary = chunkservers.remove(0);
+        let v = self
+            .chunkservers
+            .iter()
+            .next()
+            .expect("No available chunkservers");
+
+        let primary = chunkservers.take(v).unwrap();
         let secondaries = chunkservers;
 
         return Chunk::new(primary, secondaries);
@@ -381,7 +396,11 @@ impl Fs for MasterFsServer {
             }
 
             for _ in 0..length % self.chunk_size {
-                metadata.chunks.push(self.create_chunk())
+                let chunk = self.create_chunk();
+
+                self.handle_map.insert(chunk.handle, path.to_path_buf());
+
+                metadata.chunks.push(chunk);
             }
 
             // Each lease is identical, so only create a Vec of length 1

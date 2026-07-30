@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
 use std::net::Ipv4Addr;
 use std::path::Path;
 
 pub struct Config {
-    pub chunkservers: Vec<Ipv4Addr>,
+    pub chunkservers: HashSet<Ipv4Addr>,
     pub chunk_size: u64,
 }
 
@@ -16,13 +17,17 @@ impl Config {
         })
     }
 
-    fn parse(path: &Path) -> Result<Vec<Ipv4Addr>, Box<dyn Error>> {
+    fn parse(path: &Path) -> Result<HashSet<Ipv4Addr>, Box<dyn Error>> {
         let contents = fs::read_to_string(path)?;
 
         let chunkservers = contents
             .split_whitespace()
-            .map(|ip| ip.parse::<Ipv4Addr>())
-            .collect::<Result<_, _>>()?;
+            .map(str::parse::<Ipv4Addr>)
+            .collect::<Result<HashSet<_>, _>>()?;
+
+        if chunkservers.len() < 1 {
+            return Err("Malformed config file".into());
+        }
 
         Ok(chunkservers)
     }
