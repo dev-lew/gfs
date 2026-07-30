@@ -9,7 +9,7 @@ use prost_types::{Timestamp, TimestampError};
 use proto::master_chunkserver::lease_server::Lease as OtherLease;
 use proto::master_chunkserver::status_client::StatusClient;
 use proto::master_chunkserver::{
-    AssignLeaseRequest, AssignLeaseResponse, CollectStatusRequest, CollectStatusResponse,
+    AssignLeaseRequest, AssignLeaseResponse, CollectStatusRequest,
 };
 use tonic::{Request, Response, async_trait};
 

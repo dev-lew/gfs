@@ -8,7 +8,6 @@ use proto::master_chunkserver::CollectStatusRequest;
 use proto::master_chunkserver::lease_client::LeaseClient;
 use proto::master_chunkserver::lease_server::LeaseServer;
 use proto::master_chunkserver::status_client::StatusClient;
-use proto::master_chunkserver::status_server::StatusServer;
 
 use tonic::Request;
 use tonic::transport::Server;
