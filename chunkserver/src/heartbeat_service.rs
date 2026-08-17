@@ -71,8 +71,6 @@ impl Chunkserver {
         let master_addr = self.master_addr.clone();
 
         tokio::spawn(async move {
-            println!("Starting status task");
-
             loop {
                 match StatusClient::connect(format!("http://{}", master_addr).to_string())
                     .await

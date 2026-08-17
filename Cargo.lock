@@ -115,11 +115,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "client"
+name = "client-test"
 version = "0.1.0"
 dependencies = [
- "proto",
- "tonic",
+ "gfs-client",
 ]
 
 [[package]]
@@ -238,6 +237,14 @@ dependencies = [
  "r-efi",
  "wasip2",
  "wasip3",
+]
+
+[[package]]
+name = "gfs-client"
+version = "0.1.0"
+dependencies = [
+ "proto",
+ "tonic",
 ]
 
 [[package]]
