@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
-use std::net::Ipv4Addr;
+use std::net::SocketAddrV4;
 use std::path::Path;
 
 pub struct Config {
-    pub chunkservers: HashSet<Ipv4Addr>,
+    pub chunkservers: HashSet<SocketAddrV4>,
     pub chunk_size: u64,
 }
 
@@ -17,12 +17,12 @@ impl Config {
         })
     }
 
-    fn parse(path: &Path) -> Result<HashSet<Ipv4Addr>, Box<dyn Error>> {
+    fn parse(path: &Path) -> Result<HashSet<SocketAddrV4>, Box<dyn Error>> {
         let contents = fs::read_to_string(path)?;
 
         let chunkservers = contents
             .split_whitespace()
-            .map(str::parse::<Ipv4Addr>)
+            .map(str::parse::<SocketAddrV4>)
             .collect::<Result<HashSet<_>, _>>()?;
 
         if chunkservers.len() < 1 {

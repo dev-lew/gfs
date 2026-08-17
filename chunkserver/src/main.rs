@@ -4,10 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use dashmap::DashSet;
-use proto::master_chunkserver::CollectStatusRequest;
-use proto::master_chunkserver::lease_client::LeaseClient;
 use proto::master_chunkserver::lease_server::LeaseServer;
-use proto::master_chunkserver::status_client::StatusClient;
 
 use tonic::Request;
 use tonic::transport::Server;
@@ -57,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Server::builder()
         .add_service(LeaseServer::new(chunkserver))
-        .serve("[::1]:50501".parse()?)
+        .serve("0.0.0.0:50501".parse()?)
         .await?;
 
     Ok(())

@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::net::Ipv4Addr;
+use std::net::SocketAddrV4;
 use std::path::{Path, PathBuf};
 
 pub struct Config {
     pub chunk_dir: PathBuf,
-    pub master_addr: Ipv4Addr,
+    pub master_addr: SocketAddrV4,
 }
 
 impl Config {

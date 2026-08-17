@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::net::Ipv4Addr;
+use std::net::SocketAddrV4;
 use std::time::{Duration, Instant};
 
 use proto::client_master::write_response::ChunkLocation;
@@ -7,13 +7,13 @@ use proto::client_master::write_response::ChunkLocation;
 static LEASE_DURATION: Duration = Duration::from_secs(60);
 
 pub struct Lease {
-    pub primary: Option<Ipv4Addr>,
-    pub secondaries: HashSet<Ipv4Addr>,
+    pub primary: Option<SocketAddrV4>,
+    pub secondaries: HashSet<SocketAddrV4>,
     pub expiration: Instant,
 }
 
 impl Lease {
-    pub fn new(primary: Ipv4Addr, secondaries: HashSet<Ipv4Addr>) -> Self {
+    pub fn new(primary: SocketAddrV4, secondaries: HashSet<SocketAddrV4>) -> Self {
         Self {
             primary: Some(primary),
             secondaries,
@@ -51,7 +51,11 @@ impl TryFrom<&Lease> for ChunkLocation {
 
         Ok(Self {
             primary: lease.primary.unwrap().to_string(),
-            secondaries: lease.secondaries.iter().map(Ipv4Addr::to_string).collect(),
+            secondaries: lease
+                .secondaries
+                .iter()
+                .map(SocketAddrV4::to_string)
+                .collect(),
         })
     }
 }

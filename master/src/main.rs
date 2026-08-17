@@ -1,15 +1,17 @@
-use std::env;
 use std::error::Error;
 use std::path::Path;
+use std::{env, sync::Arc};
 
+use heartbeat_service::HeartbeatService;
 use proto::client_master::fs_server::FsServer;
+use proto::master_chunkserver::status_server::StatusServer;
 use tonic::transport::Server;
 
 mod config;
 use config::Config;
 
 mod fs_service;
-use fs_service::MasterFsServer;
+use fs_service::{ChunkNamespace, MasterFsServer};
 
 mod heartbeat_service;
 
@@ -19,10 +21,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config_path = &args[1];
 
     let cfg = Config::new(Path::new(config_path), 1 << 26)?;
+    let state = Arc::new(ChunkNamespace::new());
+
+    let master = MasterFsServer::new(cfg, state.clone());
 
     Server::builder()
-        .add_service(FsServer::new(MasterFsServer::new(cfg)))
-        .serve("[::1]:50501".parse()?)
+        .add_service(FsServer::new(master))
+        .add_service(StatusServer::new(HeartbeatService {
+            state: state.clone(),
+        }))
+        .serve("0.0.0.0:50501".parse()?)
         .await?;
 
     Ok(())

@@ -2,7 +2,7 @@ use core::panic;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
-use std::net::Ipv4Addr;
+use std::net::SocketAddrV4;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -68,7 +68,7 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(primary: Ipv4Addr, secondaries: HashSet<Ipv4Addr>) -> Self {
+    pub fn new(primary: SocketAddrV4, secondaries: HashSet<SocketAddrV4>) -> Self {
         Self {
             handle: NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             lease: Lease::new(primary, secondaries),
@@ -82,16 +82,15 @@ pub struct FileMetadata {
     pub chunks: Vec<Chunk>,
 }
 
-pub struct MasterFsServer {
+// Minimal state shared between MasterFsServer & Status
+pub struct ChunkNamespace {
     pub handle_map: DashMap<u64, PathBuf>,
     pub file_namespace: DashMap<PathBuf, FileMetadata>,
-    lock_namespace: DashMap<PathBuf, Arc<RwLock<()>>>,
-    chunkservers: HashSet<Ipv4Addr>,
-    chunk_size: u64,
 }
 
-impl MasterFsServer {
-    pub fn new(config: Config) -> Self {
+impl ChunkNamespace {
+    pub fn new() -> Self {
+        let handle_map = DashMap::new();
         let file_namespace = DashMap::new();
 
         file_namespace.insert(
@@ -103,6 +102,22 @@ impl MasterFsServer {
             },
         );
 
+        Self {
+            handle_map,
+            file_namespace,
+        }
+    }
+}
+
+pub struct MasterFsServer {
+    pub state: Arc<ChunkNamespace>,
+    lock_namespace: DashMap<PathBuf, Arc<RwLock<()>>>,
+    chunkservers: HashSet<SocketAddrV4>,
+    chunk_size: u64,
+}
+
+impl MasterFsServer {
+    pub fn new(config: Config, state: Arc<ChunkNamespace>) -> Self {
         let lock_namespace = DashMap::new();
 
         lock_namespace.insert(PathBuf::from("/"), Arc::new(RwLock::new(())));
@@ -113,8 +128,7 @@ impl MasterFsServer {
         } = config;
 
         Self {
-            handle_map: DashMap::new(),
-            file_namespace,
+            state,
             lock_namespace,
             chunkservers,
             chunk_size,
@@ -218,7 +232,7 @@ impl MasterFsServer {
             return Err(NamespaceError::FileWithoutLock(path.to_path_buf()));
         }
 
-        match self.file_namespace.entry(path.to_path_buf()) {
+        match self.state.file_namespace.entry(path.to_path_buf()) {
             Entry::Vacant(v) => {
                 v.insert(FileMetadata {
                     is_directory: false,
@@ -237,7 +251,7 @@ impl MasterFsServer {
             return Err(NamespaceError::FileWithoutLock(path.to_path_buf()));
         }
 
-        match self.file_namespace.entry(path.to_path_buf()) {
+        match self.state.file_namespace.entry(path.to_path_buf()) {
             Entry::Vacant(v) => {
                 v.insert(FileMetadata {
                     is_directory: true,
@@ -278,7 +292,7 @@ impl Fs for MasterFsServer {
         // TODO: Sanitize this
         let path = PathBuf::from(path);
 
-        if self.file_namespace.contains_key(&path) {
+        if self.state.file_namespace.contains_key(&path) {
             return Ok(Response::new(CreateResponse {
                 error: Some(CreateResponseError::FileExists as i32),
                 ..Default::default()
@@ -353,7 +367,7 @@ impl Fs for MasterFsServer {
 
         let path = PathBuf::from(path);
 
-        if !self.file_namespace.contains_key(&path) {
+        if !self.state.file_namespace.contains_key(&path) {
             return Ok(Response::new(WriteResponse {
                 error: Some(WriteResponseError::FileDoesNotExist as i32),
                 ..Default::default()
@@ -375,6 +389,7 @@ impl Fs for MasterFsServer {
         };
 
         let mut metadata = self
+            .state
             .file_namespace
             .get_mut(&path)
             .expect("file does not exist");
@@ -398,7 +413,9 @@ impl Fs for MasterFsServer {
             for _ in 0..length % self.chunk_size {
                 let chunk = self.create_chunk();
 
-                self.handle_map.insert(chunk.handle, path.to_path_buf());
+                self.state
+                    .handle_map
+                    .insert(chunk.handle, path.to_path_buf());
 
                 metadata.chunks.push(chunk);
             }

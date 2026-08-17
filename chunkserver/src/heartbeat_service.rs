@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::net::Ipv4Addr;
+use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -46,7 +46,7 @@ impl TryFrom<Timestamp> for Lease {
 
 pub struct Chunkserver {
     chunk_dir: PathBuf,
-    master_addr: Ipv4Addr,
+    master_addr: SocketAddrV4,
     chunks: Arc<DashSet<u64>>,
     active_leases: DashMap<u64, Lease>,
 }
@@ -71,8 +71,12 @@ impl Chunkserver {
         let master_addr = self.master_addr.clone();
 
         tokio::spawn(async move {
+            println!("Starting status task");
+
             loop {
-                match StatusClient::connect(master_addr.to_string()).await {
+                match StatusClient::connect(format!("http://{}", master_addr).to_string())
+                    .await
+                {
                     Ok(mut client) => {
                         let available_chunks = chunks.iter().map(|c| *c).collect();
 
@@ -84,7 +88,7 @@ impl Chunkserver {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to connect to client at {}: {e}", master_addr);
+                        eprintln!("Failed to connect to master at {}: {e}", master_addr);
                     }
                 }
 
