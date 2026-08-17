@@ -289,6 +289,11 @@ impl Fs for MasterFsServer {
     ) -> Result<Response<CreateResponse>, tonic::Status> {
         let CreateRequest { path, is_directory } = request.into_inner();
 
+        println!(
+            "Create request received with arguments: {}, {}",
+            path, is_directory
+        );
+
         // TODO: Sanitize this
         let path = PathBuf::from(path);
 

@@ -10,7 +10,7 @@ pub struct GfsClient {
 
 impl GfsClient {
     pub async fn new(addr: SocketAddrV4) -> Result<Self, tonic::transport::Error> {
-        let fs_client = FsClient::connect(format!("http://{}", addr)).await?;
+        let fs_client = FsClient::connect(format!("http://{}", addr).to_string()).await?;
 
         Ok(Self { inner: fs_client })
     }
