@@ -295,7 +295,7 @@ impl Fs for MasterFsServer {
         );
 
         // TODO: Sanitize this
-        let path = PathBuf::from(path);
+        let path = PathBuf::from("/").join(PathBuf::from(path));
 
         if self.state.file_namespace.contains_key(&path) {
             return Ok(Response::new(CreateResponse {
