@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 gfs-client = {path = "../gfs-client"}
+proto = {path = "../proto"}
 tokio = {version = "1.52.3", features = ["macros", "rt-multi-thread"] }
+tonic = "0.14.6"
 

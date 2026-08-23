@@ -428,7 +428,7 @@ impl Fs for MasterFsServer {
             // Each lease is identical, so only create a Vec of length 1
             // even if the number of chunks > 1 so as not to waste space
             let lease = &metadata.chunks.first().unwrap().lease;
-            let mut chunk_locations = Vec::new();
+            let mut chunk_locations = Vec::with_capacity(1);
 
             chunk_locations.push(lease.try_into().unwrap());
 

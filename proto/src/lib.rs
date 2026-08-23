@@ -5,3 +5,8 @@ pub mod master_chunkserver {
 pub mod client_master {
     tonic::include_proto!("client_master");
 }
+
+#[cfg(debug_assertions)]
+pub mod debug {
+    tonic::include_proto!("debug");
+}

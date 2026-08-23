@@ -10,6 +10,9 @@ use tonic::transport::Server;
 mod config;
 use config::Config;
 
+#[cfg(debug_assertions)]
+mod debug_service;
+
 mod fs_service;
 use fs_service::{ChunkNamespace, MasterFsServer};
 

@@ -119,7 +119,9 @@ name = "client-test"
 version = "0.1.0"
 dependencies = [
  "gfs-client",
+ "proto",
  "tokio",
+ "tonic",
 ]
 
 [[package]]
