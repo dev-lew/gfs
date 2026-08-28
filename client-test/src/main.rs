@@ -5,6 +5,8 @@ use gfs_client::GfsClient;
 
 #[cfg(debug_assertions)]
 mod debug_client;
+#[cfg(debug_assertions)]
+use debug_client::GfsDebugClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -20,6 +22,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if let Err(e) = client.create("test.txt".to_string(), false).await {
         eprintln!("Failed to create file: {}", e);
+    }
+
+    drop(client);
+
+    let mut client = match GfsDebugClient::new(addr).await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{}", e);
+            return Err(e.into());
+        }
+    };
+
+    match client.list_files().await {
+        Ok(r) => {
+            for file in r.into_inner().files {
+                println!("{}", file);
+            }
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            return Err(e.into());
+        }
     }
 
     Ok(())
