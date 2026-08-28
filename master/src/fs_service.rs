@@ -14,6 +14,7 @@ use proto::client_master::create_response::Error as CreateResponseError;
 use proto::client_master::fs_server::Fs;
 use proto::client_master::write_response::Error as WriteResponseError;
 use proto::client_master::{CreateRequest, CreateResponse, WriteRequest, WriteResponse};
+use tokio::sync::mpsc::Sender;
 use tonic::{Request, Response, async_trait};
 
 mod lease;
@@ -114,10 +115,11 @@ pub struct MasterFsServer {
     lock_namespace: DashMap<PathBuf, Arc<RwLock<()>>>,
     chunkservers: HashSet<SocketAddrV4>,
     chunk_size: u64,
+    lease_tx: Sender<u64>,
 }
 
 impl MasterFsServer {
-    pub fn new(config: Config, state: Arc<ChunkNamespace>) -> Self {
+    pub fn new(config: Config, state: Arc<ChunkNamespace>, lease_tx: Sender<u64>) -> Self {
         let lock_namespace = DashMap::new();
 
         lock_namespace.insert(PathBuf::from("/"), Arc::new(RwLock::new(())));
@@ -132,6 +134,7 @@ impl MasterFsServer {
             lock_namespace,
             chunkservers,
             chunk_size,
+            lease_tx,
         }
     }
 
@@ -379,7 +382,7 @@ impl Fs for MasterFsServer {
             }));
         }
 
-        let _guards = match self.write(&path) {
+        let guards = match self.write(&path) {
             Ok(g) => g,
 
             Err(NamespaceError::InvalidPath(_)) => {
@@ -415,12 +418,14 @@ impl Fs for MasterFsServer {
                 }));
             }
 
-            for _ in 0..length % self.chunk_size {
-                let chunk = self.create_chunk();
+            let mut handles = Vec::new();
 
-                self.state
-                    .handle_map
-                    .insert(chunk.handle, path.to_path_buf());
+            for _ in 0..length.div_ceil(self.chunk_size) {
+                let chunk = self.create_chunk();
+                let handle = chunk.handle;
+
+                self.state.handle_map.insert(handle, path.to_path_buf());
+                handles.push(handle);
 
                 metadata.chunks.push(chunk);
             }
@@ -431,6 +436,18 @@ impl Fs for MasterFsServer {
             let mut chunk_locations = Vec::with_capacity(1);
 
             chunk_locations.push(lease.try_into().unwrap());
+
+            drop(guards);
+
+            for handle in handles {
+                if let Err(_) = self.lease_tx.send(handle).await {
+                    return Ok(Response::new(WriteResponse {
+                        success: false,
+                        chunk_locations: Vec::new(),
+                        error: Some(WriteResponseError::ReceiverDropped as i32),
+                    }));
+                }
+            }
 
             return Ok(Response::new(WriteResponse {
                 success: true,

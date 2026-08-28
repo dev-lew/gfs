@@ -4,16 +4,20 @@ use std::sync::Arc;
 use dashmap::Entry;
 use proto::master_chunkserver::status_server::Status;
 use proto::master_chunkserver::{CollectStatusRequest, CollectStatusResponse};
+use tokio::sync::Mutex;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::error::TryRecvError;
 use tonic::{Request, Response, async_trait};
 
 use crate::fs_service::ChunkNamespace;
 
-pub struct HeartbeatService {
+pub struct HeartbeatServer {
     pub state: Arc<ChunkNamespace>,
+    pub lease_rx: Mutex<Receiver<u64>>,
 }
 
 #[async_trait]
-impl Status for HeartbeatService {
+impl Status for HeartbeatServer {
     async fn collect_status(
         &self,
         request: Request<CollectStatusRequest>,
@@ -53,10 +57,26 @@ impl Status for HeartbeatService {
             }
         }
 
-        // Todo: report new leases
+        let mut leased_chunks = Vec::new();
+        let mut rx = self.lease_rx.lock().await;
+
+        // TODO: investigate batching
+        loop {
+            match rx.try_recv() {
+                Ok(h) => leased_chunks.push(h),
+                Err(TryRecvError::Disconnected) => {
+                    return Err(tonic::Status::internal(format!(
+                        "Connection to chunkserver {} lost",
+                        addr,
+                    )));
+                }
+                Err(TryRecvError::Empty) => break,
+            }
+        }
+
         Ok(Response::new(CollectStatusResponse {
             deleted_chunks,
-            leased_chunks: Vec::new(),
+            leased_chunks,
         }))
     }
 }

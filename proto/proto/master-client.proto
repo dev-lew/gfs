@@ -36,7 +36,8 @@ message WriteResponse {
     INVALID_OFFSET = 1;
     INVALID_PATH = 2;
     PATH_IS_DIRECTORY = 3;
-    OTHER = 4;
+    RECEIVER_DROPPED = 4;
+    OTHER = 5;
   }
 
   message ChunkLocation {
@@ -48,3 +49,4 @@ message WriteResponse {
   repeated ChunkLocation chunk_locations = 2;
   optional Error error = 3;
 }
+
