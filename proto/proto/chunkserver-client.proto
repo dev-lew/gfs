@@ -1,0 +1,19 @@
+syntax = "proto3";
+package chunkserver_client;
+
+import "master-client.proto";
+
+service ChunkFs {
+  rpc ChunkWrite(ChunkWriteRequest) returns (ChunkWriteResponse);
+}
+
+message ChunkWriteRequest {
+  master_client.WriteRequest write_metadata = 1;
+  repeated master_client.ChunkLocation chunk_locations = 2;
+}
+
+message ChunkWriteResponse {
+  bool success = 1;
+}
+
+

@@ -9,7 +9,7 @@ use prost_types::{Timestamp, TimestampError};
 use proto::master_chunkserver::lease_server::Lease as OtherLease;
 use proto::master_chunkserver::status_client::StatusClient;
 use proto::master_chunkserver::{
-    AssignLeaseRequest, AssignLeaseResponse, CollectStatusRequest,
+    AssignLeaseRequest, AssignLeaseResponse, CollectStatusRequest, CollectStatusResponse,
 };
 use tonic::{Request, Response, async_trait};
 
@@ -78,11 +78,17 @@ impl Chunkserver {
                     Ok(mut client) => {
                         let available_chunks = chunks.iter().map(|c| *c).collect();
 
-                        if let Err(e) = client
+                        match client
                             .collect_status(CollectStatusRequest { available_chunks })
                             .await
                         {
-                            eprintln!("Failed to send status {e}");
+                            Ok(r) => {
+                                let CollectStatusResponse { deleted_chunks } =
+                                    r.into_inner();
+
+                                // TODO: Delete set of deleted chunks
+                            }
+                            Err(e) => eprintln!("Failed to send status {e}"),
                         }
                     }
                     Err(e) => {

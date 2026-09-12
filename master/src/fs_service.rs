@@ -10,10 +10,10 @@ use std::vec;
 
 use dashmap::{DashMap, Entry};
 use parking_lot::{ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock, RwLock, lock_api};
-use proto::client_master::create_response::Error as CreateResponseError;
-use proto::client_master::fs_server::Fs;
-use proto::client_master::write_response::Error as WriteResponseError;
-use proto::client_master::{CreateRequest, CreateResponse, WriteRequest, WriteResponse};
+use proto::master_client::create_response::Error as CreateResponseError;
+use proto::master_client::fs_server::Fs;
+use proto::master_client::write_response::Error as WriteResponseError;
+use proto::master_client::{CreateRequest, CreateResponse, WriteRequest, WriteResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::{Request, Response, async_trait};
 
@@ -292,6 +292,7 @@ impl Fs for MasterFsServer {
     ) -> Result<Response<CreateResponse>, tonic::Status> {
         let CreateRequest { path, is_directory } = request.into_inner();
 
+        // TODO: Start logging
         println!(
             "Create request received with arguments: {}, {}",
             path, is_directory
@@ -430,13 +431,14 @@ impl Fs for MasterFsServer {
                 metadata.chunks.push(chunk);
             }
 
-            // Each lease is identical, so only create a Vec of length 1
+            // Each lease is identical (for now), so only create a Vec of length 1
             // even if the number of chunks > 1 so as not to waste space
             let lease = &metadata.chunks.first().unwrap().lease;
             let mut chunk_locations = Vec::with_capacity(1);
 
             chunk_locations.push(lease.try_into().unwrap());
 
+            // TODO: Can we shorten the critical section?
             drop(guards);
 
             for handle in handles {

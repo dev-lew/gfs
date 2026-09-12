@@ -1,5 +1,5 @@
 syntax = "proto3";
-package client_master;
+package master_client;
 
 service Fs {
   rpc Create(CreateRequest) returns (CreateResponse);
@@ -29,6 +29,11 @@ message WriteRequest {
   uint64 length = 3;
 }
 
+message ChunkLocation {
+  string primary = 1;
+  repeated string secondaries = 2;
+}
+
 message WriteResponse {
   // TODO: Use more detail as failures occur
   enum Error {
@@ -40,10 +45,6 @@ message WriteResponse {
     OTHER = 5;
   }
 
-  message ChunkLocation {
-    string primary = 1;
-    repeated string secondaries = 2;
-  }
 
   bool success = 1;
   repeated ChunkLocation chunk_locations = 2;

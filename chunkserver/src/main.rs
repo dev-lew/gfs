@@ -6,7 +6,6 @@ use std::path::Path;
 use dashmap::DashSet;
 use proto::master_chunkserver::lease_server::LeaseServer;
 
-use tonic::Request;
 use tonic::transport::Server;
 
 mod config;

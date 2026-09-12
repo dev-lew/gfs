@@ -3,6 +3,7 @@ package master_chunkserver;
 
 import "google/protobuf/timestamp.proto";
 
+// Collectively, the Heartbeat service
 service Lease {
   rpc AssignLease(AssignLeaseRequest) returns (AssignLeaseResponse);
 }

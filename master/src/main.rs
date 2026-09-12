@@ -3,10 +3,10 @@ use std::path::Path;
 use std::{env, sync::Arc};
 
 use heartbeat_service::HeartbeatServer;
-use proto::client_master::fs_server::FsServer;
 #[cfg(debug_assertions)]
 use proto::debug::debug_server::DebugServer;
 use proto::master_chunkserver::status_server::StatusServer;
+use proto::master_client::fs_server::FsServer;
 use tokio::sync::Mutex;
 use tonic::transport::Server;
 

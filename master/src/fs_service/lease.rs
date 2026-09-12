@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::net::SocketAddrV4;
 use std::time::{Duration, Instant};
 
-use proto::client_master::write_response::ChunkLocation;
+use proto::master_client::ChunkLocation;
 
 static LEASE_DURATION: Duration = Duration::from_secs(60);
 
