@@ -47,7 +47,8 @@ message WriteResponse {
 
 
   bool success = 1;
-  repeated ChunkLocation chunk_locations = 2;
-  optional Error error = 3;
+  repeated uint64 handles = 2;
+  repeated ChunkLocation chunk_locations = 3;
+  optional Error error = 4;
 }
 

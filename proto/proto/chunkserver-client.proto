@@ -4,15 +4,16 @@ package chunkserver_client;
 import "master-client.proto";
 
 service ChunkFs {
-  rpc ChunkWrite(ChunkWriteRequest) returns (ChunkWriteResponse);
+  rpc WriteChunk(WriteChunkRequest) returns (WriteChunkResponse);
 }
 
-message ChunkWriteRequest {
+message WriteChunkRequest {
   master_client.WriteRequest write_metadata = 1;
-  repeated master_client.ChunkLocation chunk_locations = 2;
+  repeated string secondaries = 2;
 }
 
-message ChunkWriteResponse {
+// TODO: Errors
+message WriteChunkResponse {
   bool success = 1;
 }
 

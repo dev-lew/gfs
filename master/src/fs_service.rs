@@ -441,35 +441,39 @@ impl Fs for MasterFsServer {
             // TODO: Can we shorten the critical section?
             drop(guards);
 
-            for handle in handles {
-                if let Err(_) = self.lease_tx.send(handle).await {
+            for handle in &handles {
+                if let Err(_) = self.lease_tx.send(*handle).await {
                     return Ok(Response::new(WriteResponse {
-                        success: false,
-                        chunk_locations: Vec::new(),
                         error: Some(WriteResponseError::ReceiverDropped as i32),
+                        ..Default::default()
                     }));
                 }
             }
 
             return Ok(Response::new(WriteResponse {
                 success: true,
+                handles,
                 chunk_locations,
                 error: None,
             }));
         }
 
+        let mut handles = Vec::new();
         let mut chunk_locations = Vec::new();
 
         for chunk in &mut metadata.chunks {
+            handles.push(chunk.handle);
+
             if chunk.lease.primary.is_none() {
-                chunk.lease.promote_secondary()
+                chunk.lease.promote_secondary();
             }
 
-            chunk_locations.push((&chunk.lease).try_into().unwrap())
+            chunk_locations.push((&chunk.lease).try_into().unwrap());
         }
 
         Ok(Response::new(WriteResponse {
             success: true,
+            handles,
             chunk_locations,
             error: None,
         }))
