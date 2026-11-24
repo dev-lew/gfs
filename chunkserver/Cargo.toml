@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 dashmap = "6.2.1"
+lru = "0.19.0"
 prost = "0.14.3"
 prost-types = "0.14.4"
 proto = { path = "../proto" }

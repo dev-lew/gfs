@@ -1,20 +1,28 @@
 syntax = "proto3";
 package chunkserver_client;
 
-import "master-client.proto";
-
 service ChunkFs {
+  rpc Push(PushRequest) returns (PushResponse);
   rpc WriteChunk(WriteChunkRequest) returns (WriteChunkResponse);
 }
 
+message PushRequest {
+  uint64 hash = 1;
+  bytes data = 2;
+}
+
+// TODO: Errors
+message PushResponse {
+  bool success = 1;
+}
+
 message WriteChunkRequest {
-  master_client.WriteRequest write_metadata = 1;
-  repeated string secondaries = 2;
+  uint64 handle = 1;
+  uint64 offset = 2;
+
 }
 
 // TODO: Errors
 message WriteChunkResponse {
   bool success = 1;
 }
-
-
