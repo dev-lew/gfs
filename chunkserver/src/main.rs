@@ -14,6 +14,8 @@ use config::Config;
 mod heartbeat_service;
 use heartbeat_service::Chunkserver;
 
+mod chunkfs_service;
+
 fn scan_chunks(chunk_dir: &Path) -> Result<DashSet<u64>, Box<dyn Error>> {
     let chunks = DashSet::new();
 

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use dashmap::{DashMap, DashSet};
+use lru::LruCache;
 use prost_types::{Timestamp, TimestampError};
 use proto::master_chunkserver::lease_server::Lease as OtherLease;
 use proto::master_chunkserver::status_client::StatusClient;
@@ -45,7 +46,8 @@ impl TryFrom<Timestamp> for Lease {
 }
 
 pub struct Chunkserver {
-    chunk_dir: PathBuf,
+    pub chunk_dir: PathBuf,
+    pub write_cache: LruCache<u64, Vec<u8>>,
     master_addr: SocketAddrV4,
     chunks: Arc<DashSet<u64>>,
     active_leases: DashMap<u64, Lease>,
@@ -56,10 +58,14 @@ impl Chunkserver {
         let Config {
             chunk_dir,
             master_addr,
+            cache_size,
         } = config;
+
+        let write_cache = LruCache::new(cache_size);
 
         Self {
             chunk_dir,
+            write_cache,
             master_addr,
             chunks: Arc::new(chunks),
             active_leases: DashMap::new(),
@@ -83,8 +89,10 @@ impl Chunkserver {
                             .await
                         {
                             Ok(r) => {
-                                let CollectStatusResponse { deleted_chunks } =
-                                    r.into_inner();
+                                let CollectStatusResponse {
+                                    deleted_chunks,
+                                    leased_chunks,
+                                } = r.into_inner();
 
                                 // TODO: Delete set of deleted chunks
                             }
